@@ -1,0 +1,14 @@
+[project]
+name = "merge-image"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "antspyx>=0.6.3",
+    "pandas>=3.0.5",
+    "pillow>=11.0.0",
+    "simpleitk>=2.5.6",
+    "tiffslide>=2.2.0",
+    "voxelmorph>=0.3.3",
+]
