@@ -114,8 +114,35 @@ def run_simpleitk_bspline(fixed: np.ndarray, moving: np.ndarray, grid_spacing_px
     )
 
 
-def run_ants_syn(fixed: np.ndarray, moving: np.ndarray) -> RegistrationResult:
-    """Non-rigid registration with ANTsPy's symmetric diffeomorphic (SyN) transform."""
+def run_ants_syn(
+    fixed: np.ndarray,
+    moving: np.ndarray,
+    type_of_transform: str = "SyNRA",
+    aff_iterations: tuple[int, ...] = (2100, 1200, 1200, 10),
+    aff_shrink_factors: tuple[int, ...] = (6, 4, 2, 1),
+    aff_smoothing_sigmas: tuple[float, ...] = (3, 2, 1, 0),
+    reg_iterations: tuple[int, ...] = (40, 20, 0),
+) -> RegistrationResult:
+    """Non-rigid registration with ANTsPy.
+
+    `type_of_transform` selects the linear pre-alignment staging before the
+    deformable SyN stage:
+
+    - ``"SyNRA"`` (default): explicit Rigid -> Affine -> SyN. A single affine
+      optimization has a narrow capture range, which is not enough when the
+      two images differ substantially in scale/aspect ratio/resolution (e.g.
+      different scanners or modalities); the Rigid stage gives a wide capture
+      range for rotation/translation before Affine adds anisotropic
+      scale/shear - all within one coherent multi-resolution optimization.
+    - ``"SyN"``: Affine -> SyN (ANTs' standard one-shot affine stage, no
+      separate rigid-only stage).
+
+    `aff_iterations`/`aff_shrink_factors`/`aff_smoothing_sigmas` control the
+    multi-resolution schedule of the linear (Rigid/Affine) stages, and
+    `reg_iterations` the SyN stage; all four default to ANTs' own defaults,
+    but difficult cross-modal pairs (as here) often benefit from more
+    iterations and/or an extra coarse resolution level.
+    """
     import ants
     import pandas as pd
 
@@ -123,14 +150,23 @@ def run_ants_syn(fixed: np.ndarray, moving: np.ndarray) -> RegistrationResult:
     fixed_ants = ants.from_numpy(fixed.astype(np.float32))
     moving_ants = ants.from_numpy(moving.astype(np.float32))
 
-    reg = ants.registration(fixed=fixed_ants, moving=moving_ants, type_of_transform="SyN")
+    reg = ants.registration(
+        fixed=fixed_ants,
+        moving=moving_ants,
+        type_of_transform=type_of_transform,
+        aff_iterations=aff_iterations,
+        aff_shrink_factors=aff_shrink_factors,
+        aff_smoothing_sigmas=aff_smoothing_sigmas,
+        reg_iterations=reg_iterations,
+    )
     runtime = time.time() - start
 
     warped_arr = reg["warpedmovout"].numpy()
+    fwdtransforms = reg["fwdtransforms"]
 
     tmp_prefix = os.path.join(tempfile.mkdtemp(prefix="ants_compose_"), "composed_")
     composed_path = ants.apply_transforms(
-        fixed=fixed_ants, moving=moving_ants, transformlist=reg["fwdtransforms"], compose=tmp_prefix
+        fixed=fixed_ants, moving=moving_ants, transformlist=fwdtransforms, compose=tmp_prefix
     )
     disp_arr = ants.image_read(composed_path).numpy()  # (H, W, 2) already as (d_row, d_col)
 
@@ -140,7 +176,7 @@ def run_ants_syn(fixed: np.ndarray, moving: np.ndarray) -> RegistrationResult:
         # maps fixed-space points to moving-space points (opposite of the
         # convention used for `ants.apply_transforms` on images).
         df = pd.DataFrame({"x": points_xy[:, 1], "y": points_xy[:, 0]})
-        out = ants.apply_transforms_to_points(2, df, reg["fwdtransforms"])
+        out = ants.apply_transforms_to_points(2, df, fwdtransforms)
         rows = out["x"].to_numpy()
         cols = out["y"].to_numpy()
         return np.stack([cols, rows], axis=1)
@@ -148,12 +184,13 @@ def run_ants_syn(fixed: np.ndarray, moving: np.ndarray) -> RegistrationResult:
     def warp_mask(mask: np.ndarray) -> np.ndarray:
         mask_ants = ants.from_numpy(mask.astype(np.float32))
         warped_mask = ants.apply_transforms(
-            fixed=fixed_ants, moving=mask_ants, transformlist=reg["fwdtransforms"], interpolator="nearestNeighbor"
+            fixed=fixed_ants, moving=mask_ants, transformlist=fwdtransforms, interpolator="nearestNeighbor"
         )
         return (warped_mask.numpy() > 0.5).astype(np.uint8)
 
+    stage_names = {"SyNRA": "ANTsPy (Rigid + Affine + SyN)", "SyN": "ANTsPy (Affine + SyN)"}
     return RegistrationResult(
-        name="ANTsPy (SyN diffeomorphic)",
+        name=stage_names.get(type_of_transform, f"ANTsPy ({type_of_transform})"),
         warped_image=warped_arr,
         displacement_field=disp_arr,
         transform_points=transform_points,

@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 
 import numpy as np
 import pandas as pd
@@ -123,22 +124,35 @@ def _pad_to_shape(mask: np.ndarray, height: int, width: int) -> np.ndarray:
     return canvas
 
 
-def _default_annotation_path(ndpi_path: str) -> str:
-    stem = os.path.splitext(os.path.basename(ndpi_path))[0]
-    exact = os.path.join(ANNOTATIONS_DIR, f"{stem}.geojson")
-    if os.path.exists(exact) or not os.path.isdir(ANNOTATIONS_DIR):
+def _normalize_stem(stem: str) -> str:
+    """Collapse whitespace/punctuation QuPath may substitute (e.g. ';' vs '_')."""
+    return re.sub(r"[\s;_]+", " ", stem).strip().lower()
+
+
+def _default_annotation_path(slide_path: str, annotations_dir: str = ANNOTATIONS_DIR) -> str:
+    """Resolve the GeoJSON export for a slide, auto-detecting name mismatches.
+
+    QuPath's stored image name can differ from the on-disk filename (e.g. a
+    trailing "-002" scan/rescan suffix, or ';' vs '_' in the label), so this
+    falls back to a prefix match and then a punctuation-insensitive match
+    against whatever was actually exported into `annotations_dir`.
+    """
+    stem = os.path.splitext(os.path.basename(slide_path))[0]
+    exact = os.path.join(annotations_dir, f"{stem}.geojson")
+    if os.path.exists(exact) or not os.path.isdir(annotations_dir):
         return exact
 
-    # QuPath's stored image name can differ from the on-disk .ndpi filename
-    # (e.g. a trailing "-002" scan/rescan suffix), so fall back to the
-    # longest exported GeoJSON stem that is a prefix of the .ndpi stem.
-    candidates = [
-        f
-        for f in os.listdir(ANNOTATIONS_DIR)
-        if f.endswith(".geojson") and not f.startswith("TEST ") and stem.startswith(os.path.splitext(f)[0])
-    ]
-    if candidates:
-        return os.path.join(ANNOTATIONS_DIR, max(candidates, key=len))
+    geojson_files = [f for f in os.listdir(annotations_dir) if f.endswith(".geojson") and not f.startswith("TEST ")]
+
+    prefix_candidates = [f for f in geojson_files if stem.startswith(os.path.splitext(f)[0])]
+    if prefix_candidates:
+        return os.path.join(annotations_dir, max(prefix_candidates, key=len))
+
+    normalized_stem = _normalize_stem(stem)
+    normalized_candidates = [f for f in geojson_files if _normalize_stem(os.path.splitext(f)[0]) == normalized_stem]
+    if normalized_candidates:
+        return os.path.join(annotations_dir, max(normalized_candidates, key=len))
+
     return exact
 
 

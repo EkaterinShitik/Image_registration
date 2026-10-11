@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "antspyx>=0.6.3",
+    "ijson>=3.5.1",
     "pandas>=3.0.5",
     "pillow>=11.0.0",
     "simpleitk>=2.5.6",
