@@ -132,3 +132,38 @@ Methods/steps used **only** for HE ↔ COMET (`main_mask_comet.py`):
 Everything downstream of these extra steps - padding to a common canvas,
 running SimpleITK/ANTs/VoxelMorph, warping masks, and scoring with
 Dice/IoU/Precision/Recall/HD95 - is identical between the two scripts.
+
+## 4. Models used per scenario
+
+All three backends are run in every scenario (`--methods simpleitk,ants,voxelmorph`
+by default); what changes between scenarios is the input preparation and the
+ANTs staging.
+
+| Backend | Type | Configuration |
+|---|---|---|
+| **ANTsPy SyN** | Classical, diffeomorphic | `SyNRA` (Rigid -> Affine -> SyN) by default in `run_ants_syn`; SyN iterations `40,20,0`, affine iterations `2100,1200,1200,10` |
+| **SimpleITK B-spline FFD** | Classical, intensity-based | Affine initialization, then cubic B-spline with a 40 px grid; Mattes mutual information (50 bins, 30% random sampling); L-BFGS-B, 150 iterations |
+| **VoxelMorph** | Unsupervised CNN, instance-optimized | `VxmPairwise` (2D), features `(16, 32, 32, 16)`, 5 integration steps; 400 Adam iterations, lr 1e-3; local NCC + gradient smoothness loss. No pretrained model exists for this modality, so the network is optimized on each image pair |
+
+### HE ↔ HE (`main_mask.py`)
+
+- Adjacent serial H&E sections, no preprocessing beyond padding to a common canvas.
+- Reference result: **ANTsPy SyN** - Tissue Dice 0.842 -> 0.991 (sections 1-2) and
+  0.791 -> 0.985 (sections 2-3); Blood Dice 0.135 -> 0.523 and 0.161 -> 0.430;
+  about 30-35 s per pair.
+
+### HE ↔ COMET (`main_mask_comet.py`)
+
+- Same three backends, run after the cross-modality preprocessing chain described
+  in section 3.
+- Best configuration: **ANTsPy Affine + SyN** (`--ants-transform SyN`) - Tissue Dice
+  0.549 -> 0.797, Nucleus Dice 0.513 -> 0.761, about 5 s.
+- Adding an explicit rigid stage (**Rigid + Affine + SyN**, `--ants-transform SyNRA`)
+  scored lower: Tissue 0.715, Nucleus 0.679.
+- The cross-modality result stays clearly below that of same-modality serial sections.
+
+### Planned
+
+- Extend the comparison to deep-learning-based deformable registration beyond the
+  current instance-optimized VoxelMorph (e.g. trained VoxelMorph and other
+  learning-based methods), mainly to improve the hard H&E -> COMET case.
