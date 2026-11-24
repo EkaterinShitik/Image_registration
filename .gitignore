@@ -14,3 +14,5 @@ wheels/
 qupath_deveral_slides_alignment/*
 data/
 results/*
+abstract.txt
+docs/
